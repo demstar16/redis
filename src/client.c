@@ -15,34 +15,34 @@ static int32_t query(int fd, const char *text) {
         return -1;
     }
     // send request
-    char wbuf[4 + k_max_msg];
-    memcpy(wbuf, &len, 4);  // assume little endian
-    memcpy(&wbuf[4], text, len);
-    int32_t err = write_all(fd, wbuf, 4 + len);
+    char writeBuffer[4 + k_max_msg];
+    memcpy(writeBuffer, &len, 4);  // assume little endian
+    memcpy(&writeBuffer[4], text, len);
+    int32_t err = write_all(fd, writeBuffer, 4 + len);
     if (err) {
         return err;
     }
     // 4 bytes header
-    char rbuf[4 + k_max_msg];
+    char readBuffer[4 + k_max_msg];
     errno = 0;
-    err = read_full(fd, rbuf, 4);
+    err = read_full(fd, readBuffer, 4);
     if (err) {
         msg(errno == 0 ? "EOF" : "read() error");
         return err;
     }
-    memcpy(&len, rbuf, 4);  // assume little endian
+    memcpy(&len, readBuffer, 4);  // assume little endian
     if (len > k_max_msg) {
         msg("too long");
         return -1;
     }
     // reply body
-    err = read_full(fd, &rbuf[4], len);
+    err = read_full(fd, &readBuffer[4], len);
     if (err) {
         msg("read() error");
         return err;
     }
     // do something
-    printf("server says: %.*s\n", len, &rbuf[4]);
+    printf("server says: %.*s\n", len, &readBuffer[4]);
     return 0;
 }
 
