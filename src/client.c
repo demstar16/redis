@@ -9,64 +9,70 @@
 #include <arpa/inet.h>
 #include "util.h"
 
-static int32_t query(int fd, const char *text) {
-    uint32_t len = (uint32_t)strlen(text);
-    if (len > k_max_msg) {
+// Send one request and print the server's reply.
+// Message format: | 4-byte length | body of that many bytes |
+static int32_t send_request(int socket_fd, const char *text) {
+    uint32_t body_length = (uint32_t)strlen(text);
+    if (body_length > k_max_msg) {
         return -1;
     }
-    // send request
-    char writeBuffer[4 + k_max_msg];
-    memcpy(writeBuffer, &len, 4);  // assume little endian
-    memcpy(&writeBuffer[4], text, len);
-    int32_t err = write_all(fd, writeBuffer, 4 + len);
-    if (err) {
-        return err;
+
+    // Build the request: header first, then the body right after it.
+    char send_buffer[k_header_size + k_max_msg];
+    memcpy(send_buffer, &body_length, k_header_size);        // assume little endian
+    memcpy(&send_buffer[k_header_size], text, body_length);
+    int32_t error = write_all(socket_fd, send_buffer, k_header_size + body_length);
+    if (error) {
+        return error;
     }
-    // 4 bytes header
-    char readBuffer[4 + k_max_msg];
+
+    // Read the reply: header first, to learn how long the body is...
+    char receive_buffer[k_header_size + k_max_msg];
     errno = 0;
-    err = read_full(fd, readBuffer, 4);
-    if (err) {
+    error = read_full(socket_fd, receive_buffer, k_header_size);
+    if (error) {
         msg(errno == 0 ? "EOF" : "read() error");
-        return err;
+        return error;
     }
-    memcpy(&len, readBuffer, 4);  // assume little endian
-    if (len > k_max_msg) {
+    uint32_t reply_length = 0;
+    memcpy(&reply_length, receive_buffer, k_header_size);    // assume little endian
+    if (reply_length > k_max_msg) {
         msg("too long");
         return -1;
     }
-    // reply body
-    err = read_full(fd, &readBuffer[4], len);
-    if (err) {
+
+    // ...then the body.
+    error = read_full(socket_fd, &receive_buffer[k_header_size], reply_length);
+    if (error) {
         msg("read() error");
-        return err;
+        return error;
     }
-    // do something
-    printf("server says: %.*s\n", len, &readBuffer[4]);
+    printf("server says: %.*s\n", (int)reply_length, &receive_buffer[k_header_size]);
     return 0;
 }
 
 int main(void) {
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) die("socket()");
+  int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (socket_fd < 0) die("socket()");
 
-  struct sockaddr_in addr = {0};
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(1234);
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // 127.0.0.1
-  
-  int rv = connect(fd, (const struct sockaddr *)&addr, sizeof(addr));
-  if (rv < 0) die("connect");
+  struct sockaddr_in server_address = {0};
+  server_address.sin_family = AF_INET;
+  server_address.sin_port = htons(1234);
+  server_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // 127.0.0.1
 
-  int32_t err = query(fd, "hello1");
-  if (err) {
+  int connect_result = connect(socket_fd, (const struct sockaddr *)&server_address,
+                               sizeof(server_address));
+  if (connect_result < 0) die("connect");
+
+  int32_t error = send_request(socket_fd, "hello1");
+  if (error) {
       goto L_DONE;
   }
-  err = query(fd, "hello2");
-  if (err) {
+  error = send_request(socket_fd, "hello2");
+  if (error) {
       goto L_DONE;
   }
   L_DONE:
-  close(fd);
+  close(socket_fd);
   return 0;
 }
